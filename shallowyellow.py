@@ -6,5 +6,9 @@ import tensorflow as tf
 import gym
 import numpy as np
 
-for n in range(10):
-    print("I will not become self aware.")
+env = gym.make('SpaceInvaders-v0')
+env.reset()
+for _ in range(1000):
+    env.step(env.action_space.sample())
+    env.render('human')
+env.close()
