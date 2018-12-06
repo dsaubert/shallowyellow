@@ -5,19 +5,20 @@
 from keras.models import Sequential
 from keras.layers import Dense
 from keras import optimizers
+from keras.utils import plot_model
 from collections import deque
 import gym
 import time as t
 import numpy as np
 
-total_episodes = 10
+total_episodes = 5
 
 class shallow_yellow:
     def __init__(self, input_image_size, available_actions):
         self.state_size = input_image_size
         self.action_size = available_actions
-        self.memory_size = deque(maxlen = 10000) #How long should the AI hold onto memories? Once the deque is full, it begins forgetting old memories from when the AI sucked
-        self.epsilon = 0.99 #Initial Exploration rate, as a percent probability that the chosen action will be random
+        self.memories = deque(maxlen = 10000) #How long should the AI hold onto memories? Once the deque is full, it begins forgetting old memories from when the AI sucked
+        self.epsilon = 0.95 #Initial Exploration rate, as a percent probability that the chosen action will be random
         self.epsilon_decay = 0.9 #How quickly the AI stops exploring and starts to trust its decsions
         self.epsilon_minimum = 0.025 #The lowest possible exploration rate
         self.learning_rate = 0.001 #The size of each step of gradient descent
@@ -32,12 +33,16 @@ class shallow_yellow:
         return model
 
     def print_network_structure_graph(self):
-        plot_model(model, to_file='shallow_yellow_structure.png')
+        plot_model(self.model, to_file='shallow_yellow_ram_structure.png')
+
+    def remember(self, s_t,a_t,r_t,s_t1): #Uses Q-Learning Notation
+        self.memories.append(s_t,a_t,r_t,s_t1)
+
+
 
 if __name__ == "__main__": #This is structured around the Q-Learning Algorithim
     env = gym.make('Breakout-ram-v0') #Creates an instance of Atari Breakout
-    ##INITIALIZE MEMORY HERE
-    state_size = env.observation_space.shape #Asks the environment how big the screen input will be
+    state_size = env.observation_space.shape[0] #Asks the environment how big the screen input will be #For some reason is a tuple, so first value is retrieved
     action_size = env.action_space.n #Asks the environment how many possible action can be taken
     SY = shallow_yellow(state_size, action_size)
 
