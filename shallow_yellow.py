@@ -16,7 +16,7 @@ from skimage import color
 import gc
 
 total_episodes = 10000
-memory_replay_sample_size = 16
+memory_replay_sample_size = 32
 minimum_replay_size = 5000
 replay_frequency = 4 #How many steps to perform before learning again.
 save_model_frequency = 100 #Episodes in between saving iteration
@@ -35,11 +35,12 @@ class shallow_yellow:
 
     def compile_network(self): #As defined in the 2013 Nature paper
         model = Sequential()
-        model.add(Conv2D(32, 8, strides=(4,4), padding="valid", activation="relu", input_shape=(84,80,1), data_format="channels_last")) #The format of the data to be supplied is [i, j, k, l] where i is the number of training samples, j is the height of the image, k is the weight and l is the channel number.
+        model.add(Conv2D(32, 8, strides=(4,4), padding="valid", activation="relu", input_shape=(84,160,1), data_format="channels_last")) #The format of the data to be supplied is [i, j, k, l] where i is the number of training samples, j is the height of the image, k is the weight and l is the channel number.
         model.add(Conv2D(64, 4, strides=(2,2), padding="valid", activation="relu"))
-        model.add(Conv2D(64, 1, strides=(3,3), padding="valid", activation="relu"))
+        model.add(Conv2D(128, 2, strides=(1, 1), padding="valid", activation="relu"))
         model.add(Flatten())
         model.add(Dense(256, activation="relu"))
+        model.add(Dense(128, activation="relu"))
         model.add(Dense(self.action_size, activation="linear"))
         model.compile(optimizer="adam", loss="mse") #default adam LR is 0.001, mse is defined in Q-eqn of (optimal - guessed)^2
         return model
@@ -73,12 +74,12 @@ class shallow_yellow:
 
     #Takes a new frame, returns the processed version.
     def pre_process_new_frame(self, a_frame):
-         return np.reshape(self.rgb2gray(self.downscale(a_frame)), (1, 84,80,1))
+         return np.reshape(self.rgb2gray(self.downscale(a_frame)), (1, 84,160,1))
 
     #Crops out score and ceiling from frame, as well as a few pixels below
     #the paddle
     def downscale(self, big_frame):
-        return big_frame[36:-7:2,::2,:]
+        return big_frame[36:-7:2,:,:]
 
     #Reduces the RGB pixel value into a single greyscale luminosity value
     def rgb2gray(self, rgb):
@@ -108,8 +109,9 @@ def play_episode(env, SY, game_over, current_state):
         if game_over:
             return(t)
         current_state = next_state
-        if ((len(SY.memories) > minimum_replay_size) & (t % replay_frequency == 0)): #if there are enough memories available, perform experience replay
+        if ((len(SY.memories) >= minimum_replay_size) & (t % replay_frequency == 0)): #if there are enough memories available, perform experience replay
             SY.perform_memory_replay(memory_replay_sample_size)
+
 
 
 if __name__ == "__main__":
@@ -132,8 +134,10 @@ if __name__ == "__main__":
         #Play the current episode, which returns the ending amount of actions
         #it was able to execute
         time_steps_completed = play_episode(env, SY, False, processed_initial_frame)
-        SY.update_epsilon()
         print("Episode {} finished after executing {} actions.".format(episode, time_steps_completed))
+        #Don't update epsilon until the training actually begins.
+        if(episode >= 20):
+            SY.update_epsilon()
 
         #Periodically save the model
         if episode % save_model_frequency == 0:
