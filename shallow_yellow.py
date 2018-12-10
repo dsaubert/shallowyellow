@@ -16,15 +16,16 @@ from skimage import color
 import gc
 
 total_episodes = 10000
-memory_replay_sample_size = 16
-minimum_replay_size = 5000
+memory_replay_sample_size = 32
+minimum_replay_size = 50000
+replay_frequency = 4 #How many steps to perform before learning again.
 save_model_frequency = 100 #Episodes in between saving iteration
 
 class shallow_yellow:
     def __init__(self, input_image_size, available_actions):
         self.state_size = input_image_size
         self.action_size = available_actions
-        self.memories = deque(maxlen = 25000) #How long should the AI hold onto memories? Once the deque is full, it begins forgetting old memories from when the AI sucked
+        self.memories = deque(maxlen = 100000) #How long should the AI hold onto memories? Once the deque is full, it begins forgetting old memories from when the AI sucked
         self.epsilon = 0.99 #Initial Exploration rate, as a percent probability that the chosen action will be random
         self.epsilon_decay = 0.99 #How quickly the AI stops exploring and starts to trust its decsions
         self.epsilon_minimum = 0.01 #The lowest possible exploration rate
@@ -34,7 +35,7 @@ class shallow_yellow:
 
     def compile_network(self): #As defined in the 2013 Nature paper
         model = Sequential()
-        model.add(Conv2D(32, 8, strides=(4,4), padding="valid", activation="relu", input_shape = (4,105,80), batch_size=4, data_format="channels_first")) #The format of the data to be supplied is [i, j, k, l] where i is the number of training samples, j is the height of the image, k is the weight and l is the channel number.
+        model.add(Conv2D(32, 8, strides=(4,4), padding="valid", activation="relu", input_shape=(4,84,80), batch_size=1, data_format="channels_first")) #The format of the data to be supplied is [i, j, k, l] where i is the number of training samples, j is the height of the image, k is the weight and l is the channel number.
         model.add(Conv2D(64, 4, strides=(2,2), padding="valid", activation="relu"))
         model.add(Conv2D(64, 1, strides=(3,3), padding="valid", activation="relu"))
         model.add(Flatten())
@@ -64,7 +65,7 @@ class shallow_yellow:
                 chosen_action_target_reward += self.discount_rate*(np.amax(self.model.predict(next_state)))
             q_function_target = self.model.predict(current_state) #Name is not 'accurate' until next line is performed.
             q_function_target[0][action] = chosen_action_target_reward #update the reward of the chosen action, with unchanged other actions
-            self.model.fit(current_state, q_function_target, epochs=1, verbose=0) #train the model to accurately compute the actual Q value, and don't tell me you're training.
+            self.model.fit(current_state, q_function_target, batch_size=memory_replay_sample_size, epochs=1, verbose=0) #train the model to accurately compute the actual Q value, and don't tell me you're training.
 
     def update_epsilon(self):
         if self.epsilon > self.epsilon_minimum:
@@ -74,9 +75,12 @@ class shallow_yellow:
     def pre_process_new_frame(self, a_frame):
          return self.rgb2gray(self.downscale(a_frame))
 
-    def downscale(self, big_frame): #removes every other pixel in both dimensions
+    #Crops out score and ceiling from frame, as well as a few pixels below
+    #the paddle
+    def downscale(self, big_frame):
         return big_frame[36:-7:2,::2,:]
 
+    #Reduces the RGB pixel value into a single greyscale luminosity value
     def rgb2gray(self, rgb):
         return np.dot(rgb[...,:3], [.3, .6, .1])
 
@@ -85,34 +89,36 @@ class shallow_yellow:
         print("Saving Model")
         return
 
+### Main Functions ###
+
+#Oh, the wonderful laws of matrix modification. Adding the none parameter is crucial
+#for the new frame to be included, so that the dimensions line up
 def add_frame_to_state(a_state, a_frame):
     new_state = a_state[1:]
-    return(np.append(new_state, a_frame))
-
-def to_keras_input(a_state):
-    return a_state
+    return np.concatenate([new_state, a_frame[None,...]], axis=0)
 
 #Plays a single game (episode) of Breakout
 def play_episode(env, SY, game_over, current_state):
     for t in range(50000):
+
         #Allows the user to watch the NN play
         env.render()
 
         #Ask the NN for an action, which may be random, depending on the
         #current epsilon value it has
-        action = SY.choose_action(to_keras_input(current_state))
+        action = SY.choose_action(current_state)
 
         #Perform the chosen action, and capture the response from the environment
         next_frame, current_reward, game_over, debug_info = env.step(action)
 
         #Each frame needs to be pre-processed, to save on computational complexity.
         #This includes downsampling the entire image
-        next_state = add_frame_to_state(SY.pre_process_new_frame(next_frame), current_state)
-        SY.remember(to_keras_input(current_state), action, current_reward, game_over, to_keras_input(next_state))
+        next_state = add_frame_to_state(current_state, SY.pre_process_new_frame(next_frame))
+        SY.remember(current_state, action, current_reward, game_over, next_state)
         if game_over:
             return(t)
         current_state = next_state
-        if (len(SY.memories) > minimum_replay_size): #if there are enough memories available, perform experience replay
+        if ((len(SY.memories) > minimum_replay_size) & (t % replay_frequency == 0)): #if there are enough memories available, perform experience replay
             SY.perform_memory_replay(memory_replay_sample_size)
         SY.update_epsilon()
 
@@ -132,10 +138,9 @@ if __name__ == "__main__":
         #Begins the game, and receives the start screen.
         initial_frame = env.reset()
         processed_initial_frame = SY.pre_process_new_frame(initial_frame)
-        print(processed_initial_frame.shape)
         #To 'prime' the initial state, it needs 4 previous memories,
         #which are all set to the initial frame.
-        first_state = [processed_initial_frame, processed_initial_frame, processed_initial_frame, processed_initial_frame]
+        first_state = np.array([processed_initial_frame, processed_initial_frame, processed_initial_frame, processed_initial_frame])
 
         #Play the current episode, which returns the ending amount of actions
         #it was able to execute
